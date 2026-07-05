@@ -13,27 +13,24 @@ from pipeline import RAGPipeline
 
 load_dotenv()
 
-END_TOKEN = "<end>"
-
-_shared_sparse: SparseEmbeddingService | None = None
-
 
 class LLMAgent:
     """
-    Async RAG pipeline interface.
+        Unified entry point for the high-concurrency RAG pipeline.
 
-    Initialize once at application startup:
-        agent = await LLMAgent.create()
+        This class encapsulates all generation services. It acts
+        as a stateless, thread-safe manager designed to be instantiated exactly once
+        at application startup using its asynchronous factory method.
 
-    Token streaming:
-        async for token in agent.request(message, history):
-            print(token, end="", flush=True)
+        Example:
+            # At FastAPI application startup (lifespan hook):
+            app.state.agent = await LLMAgent.create()
 
-    Args:
-        message: current user question
-        history: flat list alternating user/assistant oldest first
-                 [user_msg1, asst_msg1, user_msg2, asst_msg2, ...]
-    """
+            # Shutdown:
+            await app.state.agent.close()
+
+            Remark: close() could still work incorrectly
+        """
 
     def __init__(self, pipeline: RAGPipeline):
         self._pipeline = pipeline
@@ -42,25 +39,33 @@ class LLMAgent:
     @classmethod
     async def create(cls) -> "LLMAgent":
         """
-        Async factory. Initializes all services.
-        SparseEmbeddingService is a shared singleton (model loaded once).
-        Call once at application startup.
+        Processes a user question through the RAG pipeline and streams response tokens.
+
+        This method is inherently thread-safe and safe for concurrent execution 
+        across hundreds of overlapping client tasks.
+
+        Args:
+            message: The current, raw user query text.
+            history: A flat list alternating between user and assistant messages,
+                ordered oldest to newest (e.g., [user_1, assistant_1, user_2]).
+                Defaults to None if starting a new conversation session.
+
+        Yields:
+            str: Individual text tokens as they stream from the LLM.
         """
         global _shared_sparse
         print("[LLMAgent] Initializing...")
 
         llm = LLMService()
         embedder = EmbeddingService()
+        sparse = SparseEmbeddingService()
         reranker = RerankerService()
         retrieval = HybridRetrievalModule()
-
-        if _shared_sparse is None:
-            _shared_sparse = SparseEmbeddingService()
 
         pipeline = RAGPipeline(
             llm=llm,
             embedder=embedder,
-            sparse=_shared_sparse,
+            sparse=sparse,
             reranker=reranker,
             retrieval=retrieval,
         )
@@ -84,4 +89,5 @@ class LLMAgent:
 
     async def close(self):
         """Clean shutdown of all connections."""
+        print("[LLMAgent] Shutting down services...")
         await self._pipeline.close()

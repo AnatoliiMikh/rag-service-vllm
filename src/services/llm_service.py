@@ -105,4 +105,5 @@ class LLMService:
                 yield token
 
     async def close(self):
+        print("[LLMService] Shutting down llm_service...")
         await self.client.close()

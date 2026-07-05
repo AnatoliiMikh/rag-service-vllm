@@ -198,4 +198,5 @@ class HybridRetrievalModule:
         Cleanly closes Qdrant connections.
         Called during application shutdown.
         """
+        print("[HybridRetrievalModule] Shutting down qdrant connections...")
         await self.client.close()

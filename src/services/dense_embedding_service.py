@@ -85,4 +85,5 @@ class EmbeddingService:
         ) from last_error
     
     async def close(self):
+        print("[EmbeddingService] Shutting down bge-m3 dense embedder...")
         await self.client.close()
