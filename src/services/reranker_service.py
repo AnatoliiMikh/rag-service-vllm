@@ -1,67 +1,141 @@
 # src/services/reranker_service.py
 
 import os
-from sentence_transformers import CrossEncoder
+import httpx
+import asyncio
+from dataclasses import dataclass
 from dotenv import load_dotenv
+
+from modules.qdrant_hybrid_retrieval import RetrievedChunk
 
 load_dotenv()
 
-RERANKER_MODEL_PATH = os.getenv("RERANKER_MODEL_PATH", "BAAI/bge-reranker-v2-m3")
-TOP_N = int(os.getenv("RERANKER_TOP_N", "5"))
-RRF_K = int(os.getenv("RRF_K", "60"))
+RERANKER_BASE_URL = os.getenv("RERANKER_BASE_URL", "http://localhost:8002/v1")
+RERANKER_MODEL = os.getenv("RERANKER_MODEL", "BAAI/bge-reranker-v2-m3")
+RERANKER_TOP_N = int(os.getenv("RERANKER_TOP_N", "5"))
+RERANKER_TIMEOUT_SECONDS = float(os.getenv("RERANKER_TIMEOUT_SECONDS", "30"))
+RERANKER_MAX_RETRIES = int(os.getenv("RERANKER_MAX_RETRIES", "3"))
+RERANKER_RETRY_BACKOFF = float(os.getenv("RERANKER_RETRY_BACKOFF", "0.5"))
+
+
+@dataclass(slots=True)
+class RerankedChunk:
+    text: str
+    source_file: str
+    page: int
+    query: str
+    id: str
+    retrieval_score: float
+    reranker_score: float
 
 
 class RerankerService:
-    def __init__(self):
-        print("[RerankerService] Loading BGE-Reranker...")
-        self._reranker = CrossEncoder(
-            RERANKER_MODEL_PATH,
-            device="cuda",
-        )
-        print("[RerankerService] Ready.")
+    """
+    Cross-encoder reranking via vLLM score endpoint.
+    """
 
-    def rerank(
+    def __init__(self):
+        # httpx.AsyncClient inherently uses a connection pool.
+        # This is safe and performant for concurrent server use.
+        self.client = httpx.AsyncClient(
+            timeout=RERANKER_TIMEOUT_SECONDS,
+        )
+        print(f"[RerankerService] Ready (top_n={RERANKER_TOP_N})")
+
+    async def rerank(
         self,
         query: str,
-        dense_lists: list[list[dict]],
-        bm25_lists: list[list[dict]],
-    ) -> list[dict]:
-        """
-        Step 1 - RRF: merges dense + BM25 lists into one pool.
-        Step 2 - Cross-encoder: scores (query, chunk) pairs.
-        Returns top N chunks by cross-encoder score.
-        """
-        merged = self._rrf_merge(dense_lists + bm25_lists)
-        if not merged:
+        candidates: list[RetrievedChunk],
+    ) -> list[RerankedChunk]:
+
+        if not candidates:
             return []
 
-        pairs = [[query, chunk["text"]] for chunk in merged]
-        scores = self._reranker.predict(pairs)
+        # Deduplicate chunks by ID to save massive GPU compute.
+        # Dict comprehension inherently keeps only the first seen unique ID.
+        unique_candidates_map = {}
+        for chunk in candidates:
+            if chunk.id not in unique_candidates_map:
+                unique_candidates_map[chunk.id] = chunk
+                
+        unique_candidates = list(unique_candidates_map.values())
 
-        for i, chunk in enumerate(merged):
-            chunk["ce_score"] = float(scores[i])
+        scores = await self._score_with_retry(
+            query=query,
+            candidates=unique_candidates,
+        )
 
-        return sorted(merged, key=lambda c: c["ce_score"], reverse=True)[:TOP_N]
+        # Prevent silent truncation if the API returns mismatched data
+        if len(scores) != len(unique_candidates):
+            raise ValueError(
+                f"[RerankerService] API returned {len(scores)} scores "
+                f"for {len(unique_candidates)} candidates."
+            )
 
-    def _rrf_merge(self, candidate_lists: list[list[dict]]) -> list[dict]:
-        """
-        Reciprocal Rank Fusion across all candidate lists.
-        Deduplicates by text. Formula: score += 1 / (k + rank + 1)
-        """
-        rrf_scores: dict[str, float] = {}
-        chunk_map: dict[str, dict] = {}
+        reranked = [
+            RerankedChunk(
+                text=chunk.text,
+                source_file=chunk.source_file,
+                page=chunk.page,
+                query=chunk.query,
+                id=chunk.id,
+                retrieval_score=chunk.score,
+                reranker_score=float(score),
+            )
+            for chunk, score in zip(unique_candidates, scores)
+        ]
 
-        for ranked_list in candidate_lists:
-            for rank, chunk in enumerate(ranked_list):
-                text = chunk["text"]
-                rrf_scores[text] = rrf_scores.get(text, 0.0) + (1.0 / (RRF_K + rank + 1))
-                if text not in chunk_map:
-                    chunk_map[text] = chunk
+        reranked.sort(
+            key=lambda x: x.reranker_score,
+            reverse=True,
+        )
 
-        merged = []
-        for text in sorted(rrf_scores, key=lambda t: rrf_scores[t], reverse=True):
-            chunk = chunk_map[text].copy()
-            chunk["rrf_score"] = rrf_scores[text]
-            merged.append(chunk)
+        return reranked[:RERANKER_TOP_N]
 
-        return merged
+    async def _score_with_retry(
+        self,
+        query: str,
+        candidates: list[RetrievedChunk],
+    ) -> list[float]:
+
+        payload = {
+            "model": RERANKER_MODEL,
+            "text_1": query,
+            "text_2": [chunk.text for chunk in candidates],
+        }
+
+        last_error = None
+        for attempt in range(RERANKER_MAX_RETRIES):
+            try:
+                response = await self.client.post(
+                    f"{RERANKER_BASE_URL}/score",
+                    json=payload,
+                )
+                
+                response.raise_for_status() 
+                
+                data = response.json()
+                return [
+                    float(item["score"])
+                    for item in data["data"]
+                ]
+
+            except Exception as e:
+                last_error = e
+                wait_time = RERANKER_RETRY_BACKOFF * (2 ** attempt)
+                print(
+                    f"[RerankerService] retry {attempt + 1}/"
+                    f"{RERANKER_MAX_RETRIES} failed: {e} "
+                    f"→ retrying in {wait_time:.2f}s"
+                )
+                if attempt < RERANKER_MAX_RETRIES - 1:
+                    await asyncio.sleep(wait_time)
+
+        raise RuntimeError(
+            "[RerankerService] reranking failed after "
+            f"{RERANKER_MAX_RETRIES} retries."
+        ) from last_error
+
+    async def close(self):
+        """Cleanly closes HTTP connections."""
+        await self.client.close()

@@ -1,10 +1,13 @@
 # src/pipeline.py
 
+import asyncio
+from typing import AsyncGenerator
+
 from services.llm_service import LLMService
-from services.embedding_service import EmbeddingService
+from services.dense_embedding_service import EmbeddingService
+from services.sparse_embedding_service import SparseEmbeddingService
 from services.reranker_service import RerankerService
-from services.bm25_service import BM25Service
-from modules.retrieval import RetrievalModule
+from modules.qdrant_hybrid_retrieval import HybridRetrievalModule
 from modules.context_builder import build_context
 
 
@@ -13,49 +16,69 @@ class RAGPipeline:
         self,
         llm: LLMService,
         embedder: EmbeddingService,
+        sparse: SparseEmbeddingService,
         reranker: RerankerService,
-        bm25: BM25Service,
-        retrieval: RetrievalModule,
+        retrieval: HybridRetrievalModule,
     ):
         self._llm = llm
         self._embedder = embedder
+        self._sparse = sparse
         self._reranker = reranker
-        self._bm25 = bm25
         self._retrieval = retrieval
 
-    def run(self, messages: list[str]) -> str:
+    async def run(
+        self,
+        message: str,
+        history: list[str] | None = None,
+    ) -> AsyncGenerator[str, None]:
         """
-        Receives pre-formatted list of strings from BE:
-            messages[0] = current user message
-            messages[1:] = conversation history (optional)
+        Full async RAG pipeline. Yields tokens as generated.
 
-        Returns full answer string.
+        Args:
+            message: current user question
+            history: flat list alternating user/assistant oldest first
+                     [user_msg1, asst_msg1, user_msg2, ...]
         """
-        user_message = messages[0]
-        history_strings = messages[1:] if len(messages) > 1 else []
+        if history is None:
+            history = []
 
-        # Convert history strings to OpenAI format
-        # BE passes alternating user/assistant messages oldest first
-        history = []
+        # Convert flat history list to OpenAI format
+        history_messages = []
         roles = ["user", "assistant"]
-        for i, content in enumerate(history_strings):
-            history.append({"role": roles[i % 2], "content": content})
+        for i, content in enumerate(history):
+            history_messages.append({"role": roles[i % 2], "content": content})
 
-        # Query expansion
-        queries = self._llm.expand_query(user_message)
+        # Step 1 - query expansion (sequential, needed before retrieval)
+        queries = await self._llm.expand_query(message)
 
-        # Dense retrieval
-        vectors = self._embedder.embed(queries)
-        dense_lists = self._retrieval.retrieve(vectors)
+        # Step 2 - dense + sparse embedding concurrently
+        dense_vectors, sparse_vectors = await asyncio.gather(
+            self._embedder.embed(queries),
+            self._sparse.embed(queries),
+        )
 
-        # BM25 retrieval
-        bm25_lists = [self._bm25.search(q) for q in queries]
+        # Step 3 - hybrid Qdrant search (all queries concurrently inside)
+        candidate_lists = await self._retrieval.retrieve(
+            dense_vectors,
+            sparse_vectors,
+        )
 
-        # RRF + cross-encoder rerank
-        chunks = self._reranker.rerank(user_message, dense_lists, bm25_lists)
+        # Step 4 - flatten all candidates for reranking
+        all_candidates = [
+            chunk
+            for candidate_list in candidate_lists
+            for chunk in candidate_list
+        ]
+        if not all_candidates: 
+            print(f"[RAGPipeline] No retrieval candidates found for {message}.")
+            all_candidates = []
 
-        # Assemble prompt
-        prompt_messages = build_context(user_message, history, chunks)
+        # Step 5 - rerank
+        chunks = await self._reranker.rerank(message, all_candidates)
 
-        # Generate answer
-        return self._llm.generate(prompt_messages)
+        # Step 6 - assemble prompt
+        prompt_messages = build_context(message, history_messages, chunks)
+
+        # Step 7 - stream tokens
+        async for token in self._llm.generate_stream(prompt_messages):
+            yield token
