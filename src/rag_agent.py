@@ -34,26 +34,14 @@ class LLMAgent:
 
     def __init__(self, pipeline: RAGPipeline):
         self._pipeline = pipeline
-        self._semaphore = asyncio.Semaphore(1)
 
     @classmethod
     async def create(cls) -> "LLMAgent":
         """
-        Processes a user question through the RAG pipeline and streams response tokens.
-
-        This method is inherently thread-safe and safe for concurrent execution 
-        across hundreds of overlapping client tasks.
-
-        Args:
-            message: The current, raw user query text.
-            history: A flat list alternating between user and assistant messages,
-                ordered oldest to newest (e.g., [user_1, assistant_1, user_2]).
-                Defaults to None if starting a new conversation session.
-
-        Yields:
-            str: Individual text tokens as they stream from the LLM.
+        Async factory. Initializes all services.
+        Because this is called once at server boot, all initialized services 
+        naturally act as application-wide singletons.
         """
-        global _shared_sparse
         print("[LLMAgent] Initializing...")
 
         llm = LLMService()
@@ -79,14 +67,23 @@ class LLMAgent:
         history: list[str] | None = None,
     ) -> AsyncGenerator[str, None]:
         """
-        Runs RAG pipeline and streams tokens.
-        Semaphore ensures one active generation per agent instance.
-        Create multiple LLMAgent instances for true concurrency.
-        """
-        async with self._semaphore:
-            async for token in self._pipeline.run(message, history):
-                yield token
+        Processes a user question through the RAG pipeline and streams response tokens.
 
+        This method is inherently thread-safe and safe for concurrent execution 
+        across hundreds of overlapping client tasks.
+
+        Args:
+            message: The current, raw user query text.
+            history: A flat list alternating between user and assistant messages,
+                ordered oldest to newest (e.g., [user_1, assistant_1, user_2]).
+                Defaults to None if starting a new conversation session.
+
+        Yields:
+            str: Individual text tokens as they stream from the LLM.
+        """
+        async for token in self._pipeline.run(message, history):
+                    yield token
+                    
     async def close(self):
         """Clean shutdown of all connections."""
         print("[LLMAgent] Shutting down services...")
