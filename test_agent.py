@@ -2,51 +2,96 @@
 
 import asyncio
 import sys
-sys.path.insert(0, 'src')
+import time
+import statistics
+
+sys.path.insert(0, "src")
 
 from rag_agent import LLMAgent
 
 
-async def test(agent: LLMAgent, message: str, history: list[str] = []):
-    print(f"\nQuestion: {message}")
-    if history:
-        print(f"History: {len(history)} messages")
-    print("=" * 50)
-    print("Answer: ", end="", flush=True)
+async def run_query(agent: LLMAgent, message: str):
+    start = time.perf_counter()
 
-    async for token in agent.request(message, history):
-        print(token, end="", flush=True)
+    token_count = 0
+    async for token in agent.request(message):
+        token_count += 1
 
-    print("\n" + "=" * 50)
+    end = time.perf_counter()
+
+    return {
+        "latency": end - start,
+        "tokens": token_count,
+    }
+
+
+async def worker(agent: LLMAgent, id: int, message: str, results: list):
+    result = await run_query(agent, f"[User {id}] {message}")
+    results.append(result)
+
+
+async def concurrency_test(agent: LLMAgent, concurrency: int):
+    print(f"\n--- Concurrency test: {concurrency} users ---")
+
+    results = []
+
+    tasks = [
+        worker(agent, i, "What are the admission requirements?", results)
+        for i in range(concurrency)
+    ]
+
+    await asyncio.gather(*tasks)
+
+    latencies = [r["latency"] for r in results]
+
+    print("\n--- RESULTS ---")
+    print(f"Avg latency: {statistics.mean(latencies):.3f}s")
+    print(f"Max latency: {max(latencies):.3f}s")
+    print(f"Min latency: {min(latencies):.3f}s")
+    print(f"P95 approx: {sorted(latencies)[int(len(latencies)*0.95)-1]:.3f}s")
+
+
+async def sequential_test(agent: LLMAgent):
+    print("\n--- Sequential correctness test ---")
+
+    q1 = await run_query(agent, "What are the admission requirements?")
+    q2 = await run_query(agent, "What about language requirements specifically?")
+
+    print(f"Q1 latency: {q1['latency']:.3f}s")
+    print(f"Q2 latency: {q2['latency']:.3f}s")
+
+
+async def burst_test(agent: LLMAgent):
+    print("\n--- Burst test (stress spike) ---")
+
+    tasks = [
+        run_query(agent, f"Explain topic {i}")
+        for i in range(20)
+    ]
+
+    results = await asyncio.gather(*tasks)
+
+    latencies = [r["latency"] for r in results]
+
+    print(f"Max latency under burst: {max(latencies):.3f}s")
 
 
 async def main():
     agent = await LLMAgent.create()
 
-    # Single turn
-    await test(agent, "What are the admission requirements?")
+    # 1. correctness
+    await sequential_test(agent)
 
-    # With history
-    await test(
-        agent,
-        message="What about language requirements specifically?",
-        history=[
-            "What are the admission requirements?",
-            "The program requires a general university entrance qualification...",
-        ]
-    )
+    # 2. low concurrency
+    await concurrency_test(agent, concurrency=5)
 
-    # Concurrent - two agents, two users simultaneously
-    print("\n--- Concurrent test: 2 users simultaneously ---")
-    agent2 = await LLMAgent.create()
+    # 3. medium concurrency
+    await concurrency_test(agent, concurrency=20)
 
-    await asyncio.gather(
-        test(agent, "What courses are in semester 1?"),
-        test(agent2, "What specializations are available?"),
-    )
+    # 4. burst stress
+    await burst_test(agent)
 
     await agent.close()
-    await agent2.close()
 
 
 asyncio.run(main())
