@@ -83,3 +83,6 @@ class EmbeddingService:
             f"[EmbeddingService] embedding failed after "
             f"{EMBED_MAX_RETRIES} retries"
         ) from last_error
+    
+    async def close(self):
+        await self.client.close()

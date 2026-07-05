@@ -6,21 +6,23 @@ from dotenv import load_dotenv
 
 from services.llm_service import LLMService
 from services.dense_embedding_service import EmbeddingService
+from services.sparse_embedding_service import SparseEmbeddingService
 from services.reranker_service import RerankerService
-from services.bm25_service import BM25Service
-from modules.retrieval import RetrievalModule
+from modules.qdrant_hybrid_retrieval import HybridRetrievalModule
 from pipeline import RAGPipeline
 
 load_dotenv()
 
 END_TOKEN = "<end>"
 
+_shared_sparse: SparseEmbeddingService | None = None
+
 
 class LLMAgent:
     """
-    Async RAG pipeline interface for BE.
+    Async RAG pipeline interface.
 
-    Initialize once:
+    Initialize once at application startup:
         agent = await LLMAgent.create()
 
     Token streaming:
@@ -35,29 +37,31 @@ class LLMAgent:
 
     def __init__(self, pipeline: RAGPipeline):
         self._pipeline = pipeline
-        self._semaphore = asyncio.Semaphore(1)  # one request at a time per instance
+        self._semaphore = asyncio.Semaphore(1)
 
     @classmethod
     async def create(cls) -> "LLMAgent":
         """
-        Async factory. Initializes all services and returns ready agent.
+        Async factory. Initializes all services.
+        SparseEmbeddingService is a shared singleton (model loaded once).
         Call once at application startup.
         """
+        global _shared_sparse
         print("[LLMAgent] Initializing...")
 
-        llm      = LLMService()
+        llm = LLMService()
         embedder = EmbeddingService()
         reranker = RerankerService()
-        retrieval = RetrievalModule()
+        retrieval = HybridRetrievalModule()
 
-        all_chunks = await retrieval.load_all_chunks()
-        bm25 = BM25Service(all_chunks)
+        if _shared_sparse is None:
+            _shared_sparse = SparseEmbeddingService()
 
         pipeline = RAGPipeline(
             llm=llm,
             embedder=embedder,
+            sparse=_shared_sparse,
             reranker=reranker,
-            bm25=bm25,
             retrieval=retrieval,
         )
 
@@ -67,13 +71,17 @@ class LLMAgent:
     async def request(
         self,
         message: str,
-        history: list[str] = [],
+        history: list[str] | None = None,
     ) -> AsyncGenerator[str, None]:
         """
         Runs RAG pipeline and streams tokens.
         Semaphore ensures one active generation per agent instance.
-        BE can create multiple LLMAgent instances for true concurrency.
+        Create multiple LLMAgent instances for true concurrency.
         """
         async with self._semaphore:
             async for token in self._pipeline.run(message, history):
                 yield token
+
+    async def close(self):
+        """Clean shutdown of all connections."""
+        await self._pipeline.close()

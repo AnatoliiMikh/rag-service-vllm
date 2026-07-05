@@ -82,3 +82,10 @@ class RAGPipeline:
         # Step 7 - stream tokens
         async for token in self._llm.generate_stream(prompt_messages):
             yield token
+    
+    async def close(self):
+        """Clean shutdown of all connections."""
+        await self._pipeline._retrieval.close()
+        await self._pipeline._reranker.close()
+        await self._pipeline._llm.close()
+        await self._pipeline._embedder.close()
