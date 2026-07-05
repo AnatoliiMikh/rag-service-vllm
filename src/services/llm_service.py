@@ -36,13 +36,6 @@ Example output: ["minimum GPA requirement for admission", "academic score thresh
 User question: {message}
 """
 
-_client = AsyncOpenAI(
-    base_url=LLM_BASE_URL,
-    api_key=LLM_API_KEY,
-    timeout=LLM_TIMEOUT_SECONDS,
-)
-
-
 class LLMService:
     def __init__(self):
         self.client = AsyncOpenAI(
@@ -61,7 +54,7 @@ class LLMService:
         last_error = None
         for attempt in range(LLM_MAX_RETRIES):
             try:
-                response = await _client.chat.completions.create(
+                response = await self.client.chat.completions.create(
                     model=LLM_MODEL,
                     messages=[{
                         "role": "user",
@@ -98,7 +91,7 @@ class LLMService:
         """
         Streams tokens from vLLM one by one.
         """
-        stream = await _client.chat.completions.create(
+        stream = await self.client.chat.completions.create(
             model=LLM_MODEL,
             messages=messages,
             temperature=LLM_TEMPERATURE,
