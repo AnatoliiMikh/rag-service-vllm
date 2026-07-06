@@ -139,4 +139,4 @@ class RerankerService:
     async def close(self):
         """Cleanly closes HTTP connections."""
         print("[RerankerService] Shutting down reranker...")
-        await self.client.close()
+        await self.client.aclose()
