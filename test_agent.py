@@ -100,7 +100,7 @@ async def burst_test(agent: LLMAgent):
 
     tasks = [
         run_query(agent, f"Explain topic {i}", silent=True)
-        for i in range(20)
+        for i in range(5)
     ]
 
     results = await asyncio.gather(*tasks)

@@ -85,7 +85,7 @@ class RAGPipeline:
     
     async def close(self):
         """Clean shutdown of all connections."""
-        await self._pipeline._retrieval.close()
-        await self._pipeline._reranker.close()
-        await self._pipeline._llm.close()
-        await self._pipeline._embedder.close()
+        await self._retrieval.close()
+        await self._reranker.close()
+        await self._llm.close()
+        await self._embedder.close()

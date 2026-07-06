@@ -1,6 +1,5 @@
 # async runtime
 anyio>=4.0.0
-asyncio-mqtt>=0.16.0
 
 # OpenAI-compatible clients (vLLM, embedding, reranker)
 openai>=1.40.0
@@ -13,9 +12,6 @@ qdrant-client>=1.9.0
 
 # BM25 + sparse embeddings (FastEmbed BM25)
 fastembed>=0.3.6
-
-# fallback / optional classic BM25 (if still used anywhere)
-rank-bm25>=0.2.2
 
 # environment variables
 python-dotenv>=1.0.1
