@@ -98,9 +98,16 @@ async def sequential_test(agent: LLMAgent):
 async def burst_test(agent: LLMAgent):
     print("\n--- Burst test (stress spike) ---")
 
+    test_questions = [
+        "What are the admission requirements?",
+        "What courses are in semester 1?",
+        "What specializations are available?",
+        "What is the language of instruction?",
+        "How long is the program?",
+    ]
     tasks = [
-        run_query(agent, f"Explain topic {i}", silent=True)
-        for i in range(5)
+        run_query(agent, test_questions[i % len(test_questions)], silent=True)
+        for i in range(10)
     ]
 
     results = await asyncio.gather(*tasks)
