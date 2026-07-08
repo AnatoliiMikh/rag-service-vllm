@@ -35,8 +35,8 @@ class RerankerService:
     """
 
     def __init__(self):
-        # httpx.AsyncClient inherently uses a connection pool.
-        # This is safe and performant for concurrent server use.
+        # httpx.AsyncClient inherently uses a connection pool
+        # This is safe and performant for concurrent server use
         self.client = httpx.AsyncClient(
             timeout=RERANKER_TIMEOUT_SECONDS,
         )
@@ -51,8 +51,8 @@ class RerankerService:
         if not candidates:
             return []
 
-        # Deduplicate chunks by ID to save massive GPU compute.
-        # Dict comprehension inherently keeps only the first seen unique ID.
+        # Deduplicate chunks by ID
+        # Dict comprehension inherently keeps only the first seen unique ID
         unique_candidates_map = {}
         for chunk in candidates:
             if chunk.id not in unique_candidates_map:
@@ -137,6 +137,6 @@ class RerankerService:
         ) from last_error
 
     async def close(self):
-        """Cleanly closes HTTP connections."""
+        """Closes HTTP connections"""
         print("[RerankerService] Shutting down reranker...")
         await self.client.aclose()

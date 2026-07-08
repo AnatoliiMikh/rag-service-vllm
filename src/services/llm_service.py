@@ -48,8 +48,8 @@ class LLMService:
 
     async def expand_query(self, message: str) -> list[str]:
         """
-        Generates 3 diverse query variations via vLLM.
-        Falls back to [message x3] on malformed output or network failure..
+        Generates 3 diverse query variations via vLLM
+        Falls back to [message x3] on malformed output or network failure
         """
         last_error = None
         for attempt in range(LLM_MAX_RETRIES):
@@ -89,7 +89,7 @@ class LLMService:
 
     async def generate_stream(self, messages: list[dict]) -> AsyncGenerator[str, None]:
         """
-        Streams tokens from vLLM one by one.
+        Streams tokens from vLLM one by one
         """
         stream = await self.client.chat.completions.create(
             model=LLM_MODEL,

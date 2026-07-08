@@ -21,17 +21,11 @@ QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "data_ds_bsc")
 
 RETRIEVAL_TOP_K = int(os.getenv("RETRIEVAL_TOP_K", "20"))
 
-QDRANT_TIMEOUT_SECONDS = float(
-    os.getenv("QDRANT_TIMEOUT_SECONDS", "20")
-)
+QDRANT_TIMEOUT_SECONDS = float(os.getenv("QDRANT_TIMEOUT_SECONDS", "20"))
 
-QDRANT_MAX_RETRIES = int(
-    os.getenv("QDRANT_MAX_RETRIES", "3")
-)
+QDRANT_MAX_RETRIES = int(os.getenv("QDRANT_MAX_RETRIES", "3"))
 
-QDRANT_RETRY_BACKOFF = float(
-    os.getenv("QDRANT_RETRY_BACKOFF", "0.5")
-)
+QDRANT_RETRY_BACKOFF = float(os.getenv("QDRANT_RETRY_BACKOFF", "0.5"))
 
 DENSE_VECTOR_NAME = ""
 SPARSE_VECTOR_NAME = "sparse"
@@ -176,9 +170,7 @@ class HybridRetrievalModule:
 
             except Exception as e:
                 last_error = e
-                wait_time = (
-                    QDRANT_RETRY_BACKOFF * (2 ** attempt)
-                )
+                wait_time = (QDRANT_RETRY_BACKOFF * (2 ** attempt))
                 print(
                     f"[HybridRetrievalModule] "
                     f"retry {attempt + 1}/"
@@ -195,7 +187,7 @@ class HybridRetrievalModule:
 
     async def close(self):
         """
-        Cleanly closes Qdrant connections.
+        Closes Qdrant connections.
         Called during application shutdown.
         """
         print("[HybridRetrievalModule] Shutting down qdrant connections...")

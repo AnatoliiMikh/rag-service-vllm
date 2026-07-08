@@ -16,20 +16,11 @@ load_dotenv()
 
 class LLMAgent:
     """
-        Unified entry point for the high-concurrency RAG pipeline.
+        Unified entry point for concurrent RAG pipeline.
 
         This class encapsulates all generation services. It acts
         as a stateless, thread-safe manager designed to be instantiated exactly once
         at application startup using its asynchronous factory method.
-
-        Example:
-            # At FastAPI application startup (lifespan hook):
-            app.state.agent = await LLMAgent.create()
-
-            # Shutdown:
-            await app.state.agent.close()
-
-            Remark: close() could still work incorrectly
         """
 
     def __init__(self, pipeline: RAGPipeline):
@@ -85,6 +76,6 @@ class LLMAgent:
                     yield token
                     
     async def close(self):
-        """Clean shutdown of all connections."""
+        """Shutdown of all connections."""
         print("[LLMAgent] Shutting down services...")
         await self._pipeline.close()
