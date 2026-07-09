@@ -156,9 +156,18 @@ async def interactive_chat(agent: LLMAgent):
     while True:
         try:
             user_input = input("\nYou: ")
+            
+            # 1. Exit command
             if user_input.strip().lower() in ['exit', 'quit']:
                 print("Exiting chat...")
                 break
+                
+            # 2. CLEAR HISTORY COMMAND (New!)
+            if user_input.strip().lower() in ['clear', 'reset']:
+                chat_history = []  # Completely wipe the array
+                print("--- Chat history cleared. Starting fresh! ---")
+                continue
+                
             if not user_input.strip():
                 continue
 
@@ -168,7 +177,7 @@ async def interactive_chat(agent: LLMAgent):
             # Append to history for context
             chat_history.extend([user_input, result["response"]])
             
-            # Optional: keep history array from growing infinitely (Sliding window of last 4 turns)
+            # 3. Automatic Sliding Window (Protects from crashes)
             if len(chat_history) > 8:
                 chat_history = chat_history[-8:]
                 
