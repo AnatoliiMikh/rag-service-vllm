@@ -1,5 +1,7 @@
 # test_agent.py
 
+import argparse
+
 import asyncio
 import sys
 import time
@@ -116,21 +118,89 @@ async def burst_test(agent: LLMAgent):
     print(f"Max latency under burst: {max(latencies):.3f}s")
 
 
+async def interactive_chat(agent: LLMAgent):
+    print("\n--- Interactive CLI Chat ---")
+    print("Type 'exit' or 'quit' to stop. Press Ctrl+C to abort.")
+    
+    chat_history = []
+    
+    while True:
+        try:
+            user_input = input("\nYou: ")
+            if user_input.strip().lower() in ['exit', 'quit']:
+                print("Exiting chat...")
+                break
+            if not user_input.strip():
+                continue
+
+            # Run query and print to console
+            result = await run_query(agent, user_input, history=chat_history, silent=False)
+            
+            # Append to history for context
+            chat_history.extend([user_input, result["response"]])
+            
+            # Optional: keep history array from growing infinitely (Sliding window of last 4 turns)
+            if len(chat_history) > 8:
+                chat_history = chat_history[-8:]
+                
+        except (KeyboardInterrupt, EOFError):
+            print("\nExiting chat...")
+            break
+
+async def interactive_chat(agent: LLMAgent):
+    print("\n--- Interactive CLI Chat ---")
+    print("Type 'exit' or 'quit' to stop. Press Ctrl+C to abort.")
+    
+    chat_history = []
+    
+    while True:
+        try:
+            user_input = input("\nYou: ")
+            if user_input.strip().lower() in ['exit', 'quit']:
+                print("Exiting chat...")
+                break
+            if not user_input.strip():
+                continue
+
+            # Run query and print to console
+            result = await run_query(agent, user_input, history=chat_history, silent=False)
+            
+            # Append to history for context
+            chat_history.extend([user_input, result["response"]])
+            
+            # Optional: keep history array from growing infinitely (Sliding window of last 4 turns)
+            if len(chat_history) > 8:
+                chat_history = chat_history[-8:]
+                
+        except (KeyboardInterrupt, EOFError):
+            print("\nExiting chat...")
+            break
+
 async def main():
+    parser = argparse.ArgumentParser(description="University RAG Pipeline CLI")
+    parser.add_argument("--chat", action="store_true", help="Start an interactive chat session")
+    parser.add_argument("--test", action="store_true", help="Run the full performance test suite")
+    args = parser.parse_args()
+
+    # If no arguments provided, print help and exit
+    if not args.chat and not args.test:
+        parser.print_help()
+        return
+
     agent = await LLMAgent.create()
 
-    # 1. correctness (Loud, prints text)
-    await sequential_test(agent)
+    try:
+        if args.chat:
+            await interactive_chat(agent)
+            
+        if args.test:
+            await sequential_test(agent)
+            await concurrency_test(agent, concurrency=5)
+            await concurrency_test(agent, concurrency=20)
+            await burst_test(agent)
+    finally:
+        # Guarantee teardown happens even if you Ctrl+C out of the chat
+        await agent.close()
 
-    # 2. low concurrency (Silent, prints metrics)
-    await concurrency_test(agent, concurrency=5)
-
-    # 3. medium concurrency (Silent, prints metrics)
-    await concurrency_test(agent, concurrency=20)
-
-    # 4. burst stress (Silent, prints metrics)
-    await burst_test(agent)
-
-    await agent.close()
-
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())
